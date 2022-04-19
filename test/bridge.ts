@@ -1,6 +1,7 @@
 import {expect} from "chai";
-import { ethers, network } from "hardhat";
+import {ethers, network} from "hardhat";
 import {Contracts} from "../app/config/contracts"
+import { solidityKeccak256, arrayify } from "ethers/lib/utils";
 
 describe("Bridge", function () {
     it("all", async function () {
@@ -35,23 +36,26 @@ describe("Bridge", function () {
         await erc20Two.addMember(bridgeTwo.address);
 
         //SWAP:
-        let id = 1;
         await expect(bridgeOne.swap(user2.address, amount))
             .to.emit(bridgeOne, 'Swap')
-            .withArgs(user2.address, amount, id);
+            .withArgs(user2.address, amount);
+
+        let data = await bridgeOne.swap(user2.address, amount)
+        const nonce = data.nonce;
 
         // swap -> No have tokens.
         await expect(bridgeOne.connect(user3).swap(user2.address, amount))
             .to.be.revertedWith('No have tokens.');
 
         //REDEEM:
-        let message = (user2.address + "-" + amount + "-" + 1).toLowerCase();
+        let message = arrayify(solidityKeccak256( ["address", "uint", "uint"], [user2.address, amount, nonce]));
 
         let flatSig = await wallet.signMessage(message);
 
         let sig = ethers.utils.splitSignature(flatSig);
 
-        await bridgeTwo.redeem(user2.address, amount, id, sig.v, sig.r, sig.s);
+        await bridgeTwo.redeem(user2.address, amount, nonce, sig.v, sig.r, sig.s);
+
         expect(await erc20Two.balanceOf(user2.address)).to.equal(amount);
 
         // redeem -> Not valid
@@ -59,8 +63,9 @@ describe("Bridge", function () {
             .to.be.revertedWith('Not valid.');
 
         // redeem -> The transaction has already been approved.
-        await expect(bridgeTwo.redeem(user2.address, amount, id, sig.v, sig.r, sig.s))
+        await expect(bridgeTwo.redeem(user2.address, amount, nonce, sig.v, sig.r, sig.s))
             .to.be.revertedWith('The transaction has already been approved.');
-
     });
+
+
 });
